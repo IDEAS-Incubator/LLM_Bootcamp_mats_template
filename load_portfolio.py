@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""
+Portfolio Loading Entry Point
+"""
+
+import sys
+import os
+
+# Add src directory to Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+from core.portfolio_loader import store_config
+
+if __name__ == "__main__":
+    store_config() 
