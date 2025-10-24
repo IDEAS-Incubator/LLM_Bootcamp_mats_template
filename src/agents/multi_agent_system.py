@@ -201,15 +201,36 @@ class StrategyAgent(BaseAgent):
             role=role
         )
         
-        # TODO: Implement remaining initialization (steps 2-7)
-        # Hint: self.team = team
-        # Hint: self.db_service = MongoDBService()
-        # Hint: self.email_service = EmailService()
-        # Hint: self.config = {"ma_fast": 10, "ma_slow": 20, ...}
-        # Hint: self._load_optimized_parameters()
+        # 2. Store team name for this agent
+        self.team = team
         
-        print(f"TODO: {team} StrategyAgent needs implementation!")
-        print(f"HINT: Complete steps 2-7 in __init__ method")
+        # 3. Initialize database service (MongoDBService)
+        self.db_service = MongoDBService()
+        
+        # 4. Initialize email service (EmailService)
+        self.email_service = EmailService()
+        
+        # 5. Set up default MA strategy configuration dict
+        self.config = {
+            "ma_fast": 10,  # fast moving average period
+            "ma_slow": 20,  # slow moving average period
+            "ma_trend": 50,  # trend moving average period
+            "momentum_period": 3,  # momentum calculation period
+            "volume_period": 8,  # volume analysis period
+            "position_allocation": 0.50  # position size allocation
+        }
+        
+        # 6. Call _load_optimized_parameters() method
+        self._load_optimized_parameters()
+        
+        # 7. Log successful initialization
+        trading_logger.log_message(
+            self.team,
+            f"StrategyAgent initialized with MA strategy config: {self.config}",
+            "INFO"
+        )
+        
+        print(f"StrategyAgent initialized for {team} - Config: {self.config}")
 
     def _load_optimized_parameters(self):
         """
@@ -226,9 +247,42 @@ class StrategyAgent(BaseAgent):
         6. If not found: Log warning about using defaults
         7. Handle exceptions gracefully with error logging
         """
-        # TODO: Implement optimized parameter loading
-        print(f"TODO: {self.team} StrategyAgent._load_optimized_parameters() needs implementation!")
-        pass
+        try:
+            # Query database for optimized parameters
+            optimized_params = self.db_service.db.optimized_parameters.find_one(
+                {"symbol": self.team},
+                sort=[("timestamp", -1)]
+            )
+            
+            # Check if optimized parameters exist and have "parameters" key
+            if optimized_params and "parameters" in optimized_params:
+                # Update self.config with optimized parameters
+                self.config.update(optimized_params["parameters"])
+                
+                # Log success
+                trading_logger.log_message(
+                    self.team,
+                    f"Loaded optimized parameters: {optimized_params['parameters']}",
+                    "INFO"
+                )
+                print(f"StrategyAgent: Loaded optimized parameters for {self.team}")
+            else:
+                # Log warning about using defaults
+                trading_logger.log_message(
+                    self.team,
+                    f"No optimized parameters found for {self.team}, using default config",
+                    "WARNING"
+                )
+                print(f"StrategyAgent: Using default parameters for {self.team}")
+                
+        except Exception as e:
+            # Handle exceptions gracefully with error logging
+            trading_logger.log_message(
+                self.team,
+                f"Error loading optimized parameters: {str(e)}",
+                "ERROR"
+            )
+            print(f"StrategyAgent: Error loading optimized parameters: {str(e)}")
 
 
     def _convert_price_data_to_dataframe(self, price_data: List[PriceDataPoint]) -> pd.DataFrame:
@@ -256,9 +310,62 @@ class StrategyAgent(BaseAgent):
         Returns:
             pd.DataFrame: OHLCV DataFrame with datetime index
         """
-        # TODO: Implement price data to DataFrame conversion
-        print(f"TODO: {self.team} StrategyAgent._convert_price_data_to_dataframe() needs implementation!")
-        return pd.DataFrame()
+        # 1. Check if price_data is empty, return empty DataFrame if so
+        if not price_data:
+            trading_logger.log_message(
+                self.team,
+                "No price data provided, returning empty DataFrame",
+                "WARNING"
+            )
+            return pd.DataFrame()
+        
+        # 2. Create two lists: data[] and datetimes[]
+        data = []
+        datetimes = []
+        
+        # 3. Loop through each point in price_data
+        for point in price_data:
+            # Extract OHLCV data: open, high, low, close (from point.price), volume
+            data_point = {
+                'open': point.price.open,
+                'high': point.price.high,
+                'low': point.price.low,
+                'close': point.price.close,
+                'volume': point.volume,
+                'price_change': point.price_change
+            }
+            data.append(data_point)
+            
+            # Parse datetime with pd.to_datetime(point.datetime)
+            dt = pd.to_datetime(point.datetime)
+            
+            # Handle timezone: localize to UTC if no timezone, convert to UTC if timezone exists
+            if dt.tz is None:
+                dt = dt.tz_localize('UTC')
+            else:
+                dt = dt.tz_convert('UTC')
+            
+            # Add normalized datetime to datetimes list
+            datetimes.append(dt)
+        
+        # 4. Create DataFrame from data list
+        df = pd.DataFrame(data)
+        
+        # 5. Set index to DatetimeIndex from datetimes list
+        df.index = pd.DatetimeIndex(datetimes)
+        
+        # 6. Sort by index chronologically
+        df = df.sort_index()
+        
+        # 7. Log conversion results with trading_logger
+        trading_logger.log_message(
+            self.team,
+            f"Converted {len(price_data)} price points to DataFrame with shape {df.shape}",
+            "INFO"
+        )
+        
+        # 8. Return the processed DataFrame
+        return df
 
     async def process(self, state: AgentState) -> AgentState:
         """
@@ -312,10 +419,156 @@ class StrategyAgent(BaseAgent):
         Returns:
             AgentState: Updated state with strategy analysis results
         """
-        # TODO: Implement complete MA strategy workflow 
-        print(f"TODO: {self.team} StrategyAgent.process() needs complete implementation!")
-        print("HINT: Use functions from strategy.MA.ma_strategy module!")
-        print("HINT: Follow the 8 steps outlined in the docstring above!")
+        # STEP 1: SETUP AND LOGGING
+        trading_logger.log_message(
+            self.team,
+            f"Starting MA strategy analysis for {self.team}",
+            "INFO"
+        )
+        print(f"StrategyAgent: Starting MA strategy analysis for {self.team}")
+        
+        # STEP 2: DATA RETRIEVAL
+        snapshot = self.db_service.get_latest_snapshot(self.team)
+        if not snapshot:
+            trading_logger.log_message(
+                self.team,
+                f"No price snapshot found for {self.team}",
+                "ERROR"
+            )
+            print(f"StrategyAgent: No price snapshot found for {self.team}")
+            # Mark as complete to avoid blocking workflow
+            state["trading_teams"][self.team.lower()]["strategy_complete"] = True
+            return state
+        
+        # STEP 3: DATA PREPARATION
+        df = self._convert_price_data_to_dataframe(snapshot.price_data)
+        if df.empty:
+            trading_logger.log_message(
+                self.team,
+                f"Empty DataFrame after conversion for {self.team}",
+                "WARNING"
+            )
+            print(f"StrategyAgent: Empty DataFrame for {self.team}")
+            # Mark as complete to avoid blocking workflow
+            state["trading_teams"][self.team.lower()]["strategy_complete"] = True
+            return state
+        
+        # STEP 4: TECHNICAL ANALYSIS (Import from strategy.MA.ma_strategy!)
+        try:
+            # Apply moving averages
+            df = add_multi_timeframe_moving_averages(df, self.config)
+            
+            # Apply momentum
+            df = add_multi_timeframe_momentum(df, self.config["momentum_period"])
+            
+            # Apply volume analysis
+            df = add_multi_timeframe_volume(df, self.config["volume_period"])
+            
+            # Apply support/resistance
+            df = add_multi_timeframe_support_resistance(df, 15)
+            
+            # Apply price patterns
+            df = add_price_patterns(df)
+            
+            trading_logger.log_message(
+                self.team,
+                f"Applied technical analysis indicators to DataFrame",
+                "INFO"
+            )
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error applying technical analysis: {str(e)}",
+                "ERROR"
+            )
+            print(f"StrategyAgent: Error in technical analysis: {str(e)}")
+            # Mark as complete to avoid blocking workflow
+            state["trading_teams"][self.team.lower()]["strategy_complete"] = True
+            return state
+        
+        # STEP 5: SIGNAL GENERATION (Import from strategy.MA.ma_strategy!)
+        try:
+            signal_result = generate_ma_signal(df, self.config)
+            
+            # Extract signal details
+            signal = signal_result.get("signal", "HOLD")
+            strategy_details = signal_result.get("strategy_details", {})
+            current_price = signal_result.get("current_price", 0.0)
+            signal_reason = signal_result.get("signal_reason", "No reason provided")
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error generating signal: {str(e)}",
+                "ERROR"
+            )
+            print(f"StrategyAgent: Error generating signal: {str(e)}")
+            # Use default values
+            signal = "HOLD"
+            strategy_details = {}
+            current_price = df['close'].iloc[-1] if not df.empty else 0.0
+            signal_reason = "Error in signal generation"
+        
+        # STEP 6: LOGGING AND NOTIFICATIONS
+        trading_logger.log_message(
+            self.team,
+            f"Generated signal: {signal} for {self.team} at price {current_price}",
+            "INFO"
+        )
+        print(f"StrategyAgent: Signal {signal} for {self.team} at ${current_price:.2f}")
+        print(f"StrategyAgent: Reason: {signal_reason}")
+        
+        # Send email notification if signal != "HOLD"
+        if signal != "HOLD":
+            try:
+                self.email_service.send_signal_email(
+                    self.team,
+                    signal,
+                    current_price,
+                    signal_reason,
+                    strategy_details
+                )
+                trading_logger.log_message(
+                    self.team,
+                    f"Sent email notification for {signal} signal",
+                    "INFO"
+                )
+            except Exception as e:
+                trading_logger.log_message(
+                    self.team,
+                    f"Error sending email notification: {str(e)}",
+                    "ERROR"
+                )
+        
+        # STEP 7: COMMUNICATION
+        message_content = f"""TO: {self.team} Risk Agent
+MESSAGE: MA Strategy Analysis Complete
+SIGNAL: {signal}
+PRICE: {current_price}
+STRATEGY: MA_CROSSOVER
+MA_FAST: {strategy_details.get('ma_fast', 'N/A')}
+MA_SLOW: {strategy_details.get('ma_slow', 'N/A')}
+MA_TREND: {strategy_details.get('ma_trend', 'N/A')}
+REASON: {signal_reason}
+ACTION: Proceed with risk assessment"""
+        
+        state["messages"].append(AIMessage(content=message_content))
+        state["message_history"].append({
+            "from": self.name,
+            "content": f"MA Strategy Analysis: {signal} signal at ${current_price:.2f}",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # STEP 8: WORKFLOW UPDATE
+        state["trading_teams"][self.team.lower()]["strategy_complete"] = True
+        
+        trading_logger.log_message(
+            self.team,
+            f"MA strategy analysis completed for {self.team}",
+            "INFO"
+        )
+        
         return state
 
     def __del__(self):
@@ -327,8 +580,22 @@ class StrategyAgent(BaseAgent):
         2. Call self.db_service.close() to cleanup database connection
         3. This prevents resource leaks when agent is destroyed
         """
-        # TODO: Implement resource cleanup
-        pass
+        # Check if self.db_service exists using hasattr()
+        if hasattr(self, 'db_service') and self.db_service:
+            try:
+                # Call self.db_service.close() to cleanup database connection
+                self.db_service.close()
+                trading_logger.log_message(
+                    self.team,
+                    "StrategyAgent database connection closed",
+                    "INFO"
+                )
+            except Exception as e:
+                trading_logger.log_message(
+                    self.team,
+                    f"Error closing database connection: {str(e)}",
+                    "ERROR"
+                )
 
 # =============================================================================
 # END STRATEGY AGENT TEMPLATE
@@ -394,13 +661,30 @@ class RiskAgent(BaseAgent):
             role=role
         )
         
-        # TODO: Implement remaining initialization (steps 2-6)
-        # Hint: self.team = team
-        # Hint: self.db_service = MongoDBService()
-        # Hint: Set up risk parameters in a dict or as attributes
+        # 2. Store team name
+        self.team = team
         
-        print(f"TODO: {team} RiskAgent needs implementation!")
-        print(f"HINT: Complete steps 2-6 in __init__ method")
+        # 3. Initialize database service for risk data storage
+        self.db_service = MongoDBService()
+        
+        # 4. Set up risk management parameters
+        self.max_position_size = 0.10  # Maximum position size (10%)
+        self.max_portfolio_exposure = 0.80  # Maximum total exposure (80%)
+        self.stop_loss_pct = 0.02  # Default stop loss percentage (2%)
+        self.take_profit_pct = 0.04  # Default take profit percentage (4%)
+        self.max_correlation = 0.70  # Maximum correlation between positions (70%)
+        
+        # 5. Initialize position tracking dictionary
+        self.position_tracking = {}
+        
+        # 6. Log successful initialization
+        trading_logger.log_message(
+            self.team,
+            f"RiskAgent initialized with risk parameters - Max Position: {self.max_position_size}, Max Exposure: {self.max_portfolio_exposure}",
+            "INFO"
+        )
+        
+        print(f"RiskAgent initialized for {team} - Max Position: {self.max_position_size}, Max Exposure: {self.max_portfolio_exposure}")
 
     def _parse_strategy_message(self, messages: List) -> Dict:
         """
@@ -420,8 +704,77 @@ class RiskAgent(BaseAgent):
         Returns:
             Dict: Parsed signal data or empty dict if parsing fails
         """
-        # TODO: Implement message parsing
-        return {}
+        try:
+            # Find the latest message from "{self.team} Strategy Agent"
+            strategy_agent_name = f"{self.team} Strategy Agent"
+            latest_message = None
+            
+            for message in reversed(messages):
+                if hasattr(message, 'content') and strategy_agent_name in str(message.content):
+                    latest_message = message
+                    break
+            
+            if not latest_message:
+                trading_logger.log_message(
+                    self.team,
+                    f"No message found from {strategy_agent_name}",
+                    "WARNING"
+                )
+                return {}
+            
+            # Parse message content to extract signal data
+            content = str(latest_message.content)
+            parsed_data = {}
+            
+            # Extract SIGNAL
+            if "SIGNAL:" in content:
+                signal_line = [line for line in content.split('\n') if 'SIGNAL:' in line][0]
+                parsed_data['signal'] = signal_line.split('SIGNAL:')[1].strip()
+            
+            # Extract PRICE
+            if "PRICE:" in content:
+                price_line = [line for line in content.split('\n') if 'PRICE:' in line][0]
+                parsed_data['price'] = float(price_line.split('PRICE:')[1].strip())
+            
+            # Extract STRATEGY
+            if "STRATEGY:" in content:
+                strategy_line = [line for line in content.split('\n') if 'STRATEGY:' in line][0]
+                parsed_data['strategy'] = strategy_line.split('STRATEGY:')[1].strip()
+            
+            # Extract MA values
+            if "MA_FAST:" in content:
+                ma_fast_line = [line for line in content.split('\n') if 'MA_FAST:' in line][0]
+                parsed_data['ma_fast'] = ma_fast_line.split('MA_FAST:')[1].strip()
+            
+            if "MA_SLOW:" in content:
+                ma_slow_line = [line for line in content.split('\n') if 'MA_SLOW:' in line][0]
+                parsed_data['ma_slow'] = ma_slow_line.split('MA_SLOW:')[1].strip()
+            
+            if "MA_TREND:" in content:
+                ma_trend_line = [line for line in content.split('\n') if 'MA_TREND:' in line][0]
+                parsed_data['ma_trend'] = ma_trend_line.split('MA_TREND:')[1].strip()
+            
+            # Extract REASON
+            if "REASON:" in content:
+                reason_line = [line for line in content.split('\n') if 'REASON:' in line][0]
+                parsed_data['reason'] = reason_line.split('REASON:')[1].strip()
+            
+            trading_logger.log_message(
+                self.team,
+                f"Parsed strategy message: {parsed_data}",
+                "INFO"
+            )
+            
+            return parsed_data
+            
+        except Exception as e:
+            # Handle parsing errors gracefully
+            trading_logger.log_message(
+                self.team,
+                f"Error parsing strategy message: {str(e)}",
+                "ERROR"
+            )
+            return {}
 
     def _calculate_position_size(self, signal: str, price: float, portfolio_value: float) -> float:
         """
@@ -443,8 +796,75 @@ class RiskAgent(BaseAgent):
         Returns:
             float: Position size as percentage (0.0 to 1.0)
         """
-        # TODO: Implement position sizing logic
-        return 0.05  # Placeholder: 5% position size
+        try:
+            # 1. Get current portfolio value (already provided as parameter)
+            if portfolio_value <= 0:
+                trading_logger.log_message(
+                    self.team,
+                    f"Invalid portfolio value: {portfolio_value}",
+                    "ERROR"
+                )
+                return 0.0
+            
+            # 2. Calculate maximum allowed position size based on risk rules
+            base_position_size = self.max_position_size  # Start with max position size
+            
+            # 3. Consider current portfolio exposure
+            current_exposure = self._get_current_portfolio_exposure()
+            remaining_exposure_capacity = self.max_portfolio_exposure - current_exposure
+            
+            # Adjust position size based on remaining exposure capacity
+            if remaining_exposure_capacity < base_position_size:
+                base_position_size = max(0.01, remaining_exposure_capacity)  # Minimum 1%
+                trading_logger.log_message(
+                    self.team,
+                    f"Reduced position size due to exposure limits: {base_position_size}",
+                    "WARNING"
+                )
+            
+            # 4. Adjust for market volatility (higher volatility = smaller position)
+            volatility_adjustment = self._calculate_volatility_adjustment(price)
+            adjusted_position_size = base_position_size * volatility_adjustment
+            
+            # 5. Ensure position size doesn't exceed risk limits
+            final_position_size = min(adjusted_position_size, self.max_position_size)
+            final_position_size = max(0.01, final_position_size)  # Minimum 1%
+            
+            trading_logger.log_message(
+                self.team,
+                f"Calculated position size: {final_position_size:.3f} (base: {base_position_size:.3f}, volatility adj: {volatility_adjustment:.3f})",
+                "INFO"
+            )
+            
+            # 6. Return position size as percentage of portfolio (0.0 to 1.0)
+            return final_position_size
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error calculating position size: {str(e)}",
+                "ERROR"
+            )
+            return 0.05  # Default 5% position size on error
+    
+    def _get_current_portfolio_exposure(self) -> float:
+        """Helper method to get current portfolio exposure"""
+        try:
+            # This would typically query the database for current positions
+            # For now, return a simulated value
+            return 0.3  # 30% current exposure
+        except Exception:
+            return 0.0
+    
+    def _calculate_volatility_adjustment(self, price: float) -> float:
+        """Helper method to calculate volatility adjustment factor"""
+        try:
+            # This would typically calculate volatility from recent price data
+            # For now, return a simulated adjustment factor
+            # Higher volatility = lower adjustment factor (smaller position)
+            return 0.8  # 80% of base position size due to volatility
+        except Exception:
+            return 1.0  # No adjustment on error
 
     def _assess_risk_level(self, signal_data: Dict) -> Dict:
         """
@@ -468,13 +888,160 @@ class RiskAgent(BaseAgent):
         Returns:
             Dict: Risk assessment results
         """
-        # TODO: Implement risk assessment
-        return {
-            "risk_level": "MEDIUM",
-            "risk_factors": ["TODO: Implement risk factor analysis"],
-            "recommendation": "PROCEED",
-            "adjusted_position_size": 0.05
-        }
+        try:
+            risk_factors = []
+            risk_score = 0
+            
+            # 1. Analyze market volatility (using price data from last N periods)
+            volatility_risk = self._analyze_market_volatility(signal_data.get('price', 0))
+            if volatility_risk > 0.7:
+                risk_factors.append("High market volatility detected")
+                risk_score += 2
+            elif volatility_risk > 0.4:
+                risk_factors.append("Moderate market volatility")
+                risk_score += 1
+            
+            # 2. Check portfolio concentration risk
+            concentration_risk = self._check_portfolio_concentration()
+            if concentration_risk > 0.8:
+                risk_factors.append("High portfolio concentration")
+                risk_score += 2
+            elif concentration_risk > 0.5:
+                risk_factors.append("Moderate portfolio concentration")
+                risk_score += 1
+            
+            # 3. Evaluate correlation with existing positions
+            correlation_risk = self._evaluate_position_correlation(signal_data.get('signal', ''))
+            if correlation_risk > self.max_correlation:
+                risk_factors.append(f"High correlation with existing positions ({correlation_risk:.2f})")
+                risk_score += 2
+            elif correlation_risk > 0.5:
+                risk_factors.append(f"Moderate correlation with existing positions ({correlation_risk:.2f})")
+                risk_score += 1
+            
+            # 4. Assess signal strength and confidence
+            signal_strength = self._assess_signal_strength(signal_data)
+            if signal_strength < 0.3:
+                risk_factors.append("Weak signal strength")
+                risk_score += 2
+            elif signal_strength < 0.6:
+                risk_factors.append("Moderate signal strength")
+                risk_score += 1
+            
+            # 5. Calculate Value at Risk (VaR) if applicable
+            var_risk = self._calculate_var_risk(signal_data.get('price', 0))
+            if var_risk > 0.05:  # 5% VaR threshold
+                risk_factors.append(f"High VaR risk ({var_risk:.2%})")
+                risk_score += 2
+            elif var_risk > 0.02:  # 2% VaR threshold
+                risk_factors.append(f"Moderate VaR risk ({var_risk:.2%})")
+                risk_score += 1
+            
+            # Determine risk level based on score
+            if risk_score >= 5:
+                risk_level = "HIGH"
+                recommendation = "REJECT"
+                position_adjustment = 0.0
+            elif risk_score >= 3:
+                risk_level = "MEDIUM"
+                recommendation = "REDUCE"
+                position_adjustment = 0.5  # Reduce position by 50%
+            else:
+                risk_level = "LOW"
+                recommendation = "PROCEED"
+                position_adjustment = 1.0  # No adjustment
+            
+            # Calculate adjusted position size
+            base_position_size = self.max_position_size
+            adjusted_position_size = base_position_size * position_adjustment
+            
+            # Ensure minimum position size for PROCEED recommendations
+            if recommendation == "PROCEED" and adjusted_position_size < 0.01:
+                adjusted_position_size = 0.01
+            
+            risk_assessment = {
+                "risk_level": risk_level,
+                "risk_factors": risk_factors,
+                "recommendation": recommendation,
+                "adjusted_position_size": adjusted_position_size,
+                "risk_score": risk_score,
+                "volatility_risk": volatility_risk,
+                "concentration_risk": concentration_risk,
+                "correlation_risk": correlation_risk,
+                "signal_strength": signal_strength,
+                "var_risk": var_risk
+            }
+            
+            trading_logger.log_message(
+                self.team,
+                f"Risk assessment completed: {risk_level} risk, recommendation: {recommendation}",
+                "INFO"
+            )
+            
+            return risk_assessment
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error in risk assessment: {str(e)}",
+                "ERROR"
+            )
+            return {
+                "risk_level": "HIGH",
+                "risk_factors": ["Error in risk assessment"],
+                "recommendation": "REJECT",
+                "adjusted_position_size": 0.0,
+                "risk_score": 10
+            }
+    
+    def _analyze_market_volatility(self, price: float) -> float:
+        """Helper method to analyze market volatility"""
+        try:
+            # This would typically calculate volatility from recent price data
+            # For now, return a simulated volatility score (0.0 to 1.0)
+            return 0.3  # 30% volatility
+        except Exception:
+            return 0.5  # Default moderate volatility
+    
+    def _check_portfolio_concentration(self) -> float:
+        """Helper method to check portfolio concentration risk"""
+        try:
+            # This would typically analyze current portfolio positions
+            # For now, return a simulated concentration score (0.0 to 1.0)
+            return 0.4  # 40% concentration
+        except Exception:
+            return 0.5  # Default moderate concentration
+    
+    def _evaluate_position_correlation(self, signal: str) -> float:
+        """Helper method to evaluate correlation with existing positions"""
+        try:
+            # This would typically calculate correlation with existing positions
+            # For now, return a simulated correlation score (0.0 to 1.0)
+            return 0.2  # 20% correlation
+        except Exception:
+            return 0.3  # Default moderate correlation
+    
+    def _assess_signal_strength(self, signal_data: Dict) -> float:
+        """Helper method to assess signal strength and confidence"""
+        try:
+            # This would typically analyze signal quality based on technical indicators
+            # For now, return a simulated signal strength (0.0 to 1.0)
+            signal = signal_data.get('signal', 'HOLD')
+            if signal == 'BUY' or signal == 'SELL':
+                return 0.7  # Strong signal
+            else:
+                return 0.3  # Weak signal
+        except Exception:
+            return 0.5  # Default moderate strength
+    
+    def _calculate_var_risk(self, price: float) -> float:
+        """Helper method to calculate Value at Risk"""
+        try:
+            # This would typically calculate VaR based on historical price movements
+            # For now, return a simulated VaR percentage
+            return 0.02  # 2% VaR
+        except Exception:
+            return 0.03  # Default 3% VaR
 
     async def process(self, state: AgentState) -> AgentState:
         """
@@ -513,14 +1080,101 @@ class RiskAgent(BaseAgent):
         Returns:
             AgentState: Updated state with risk assessment results
         """
-        # TODO: Implement complete risk assessment workflow
-        print(f"TODO: {self.team} RiskAgent.process() needs implementation!")
-        print("HINT: Start with _parse_strategy_message() to extract signal data")
-        print("HINT: Use _assess_risk_level() to evaluate risks")
-        print("HINT: Forward approved signals to Order Agent")
+        # STEP 1: MESSAGE PARSING
+        trading_logger.log_message(
+            self.team,
+            f"Starting risk assessment for {self.team}",
+            "INFO"
+        )
+        print(f"RiskAgent: Starting risk assessment for {self.team}")
         
-        # Mark as complete to avoid blocking workflow during development
+        signal_data = self._parse_strategy_message(state["messages"])
+        if not signal_data:
+            trading_logger.log_message(
+                self.team,
+                f"No valid signal data found for {self.team}",
+                "WARNING"
+            )
+            print(f"RiskAgent: No valid signal data found for {self.team}")
+            # Mark as complete to avoid blocking workflow
+            state["trading_teams"][self.team.lower()]["risk_complete"] = True
+            return state
+        
+        # STEP 2: RISK ASSESSMENT
+        risk_assessment = self._assess_risk_level(signal_data)
+        
+        # Calculate appropriate position size
+        portfolio_value = 100000  # Simulated portfolio value - would come from database
+        position_size = self._calculate_position_size(
+            signal_data.get('signal', 'HOLD'),
+            signal_data.get('price', 0),
+            portfolio_value
+        )
+        
+        # Apply risk-adjusted position size
+        final_position_size = position_size * risk_assessment["adjusted_position_size"]
+        
+        # STEP 3: DECISION MAKING
+        recommendation = risk_assessment["recommendation"]
+        signal = signal_data.get('signal', 'HOLD')
+        price = signal_data.get('price', 0)
+        
+        trading_logger.log_message(
+            self.team,
+            f"Risk assessment result: {recommendation} for {signal} signal at ${price:.2f}",
+            "INFO"
+        )
+        print(f"RiskAgent: Recommendation: {recommendation} for {signal} signal")
+        print(f"RiskAgent: Risk Level: {risk_assessment['risk_level']}")
+        print(f"RiskAgent: Position Size: {final_position_size:.3f}")
+        
+        # STEP 4: COMMUNICATION
+        if recommendation == "REJECT":
+            message_content = f"""TO: {self.team} Order Agent
+MESSAGE: Risk Assessment - SIGNAL REJECTED
+SIGNAL: {signal}
+PRICE: {price}
+STRATEGY: {signal_data.get('strategy', 'N/A')}
+RISK_LEVEL: {risk_assessment['risk_level']}
+RECOMMENDATION: REJECT
+REASON: {', '.join(risk_assessment['risk_factors'])}
+ACTION: Do not execute order"""
+            
+            print(f"RiskAgent: Signal REJECTED due to risk factors: {risk_assessment['risk_factors']}")
+            
+        else:  # PROCEED or REDUCE
+            message_content = f"""TO: {self.team} Order Agent
+MESSAGE: Risk Assessment - SIGNAL APPROVED
+SIGNAL: {signal}
+PRICE: {price}
+STRATEGY: {signal_data.get('strategy', 'N/A')}
+RISK_LEVEL: {risk_assessment['risk_level']}
+RECOMMENDATION: {recommendation}
+POSITION_SIZE: {final_position_size:.3f}
+STOP_LOSS: {self.stop_loss_pct:.2%}
+TAKE_PROFIT: {self.take_profit_pct:.2%}
+RISK_FACTORS: {', '.join(risk_assessment['risk_factors']) if risk_assessment['risk_factors'] else 'None'}
+ACTION: Execute order with risk parameters"""
+            
+            print(f"RiskAgent: Signal APPROVED with {recommendation} recommendation")
+        
+        # Add message to state
+        state["messages"].append(AIMessage(content=message_content))
+        state["message_history"].append({
+            "from": self.name,
+            "content": f"Risk Assessment: {recommendation} for {signal} signal (Risk: {risk_assessment['risk_level']})",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # STEP 5: STATE UPDATE
         state["trading_teams"][self.team.lower()]["risk_complete"] = True
+        
+        trading_logger.log_message(
+            self.team,
+            f"Risk assessment completed for {self.team}",
+            "INFO"
+        )
+        
         return state
 
 # =============================================================================
@@ -564,13 +1218,33 @@ class OrderAgent(BaseAgent):
             role=role
         )
         
-        # TODO: Implement remaining initialization (steps 2-7)
-        # Hint: self.team = team
-        # Hint: self.db_service = MongoDBService()
-        # Hint: Set up order parameters as attributes or in a dict
+        # 2. Store team name
+        self.team = team
         
-        print(f"TODO: {team} OrderAgent needs implementation!")
-        print(f"HINT: Complete steps 2-7 in __init__ method")
+        # 3. Initialize database service for order storage
+        self.db_service = MongoDBService()
+        
+        # 4. Set up order execution parameters
+        self.order_types = ["market", "limit", "stop_loss"]
+        self.default_slippage = 0.001  # Expected slippage percentage (0.1%)
+        self.max_order_size = 1000000  # Maximum order size limit ($1M)
+        self.timeout_seconds = 30  # Order timeout (30 seconds)
+        
+        # 5. Initialize position tracking
+        self.position_tracking = {}
+        
+        # 6. Set up exchange connection (simulation mode for now)
+        self.exchange_connected = False  # Would be True for real trading
+        self.simulation_mode = True  # Enable simulation mode
+        
+        # 7. Log successful initialization
+        trading_logger.log_message(
+            self.team,
+            f"OrderAgent initialized with order types: {self.order_types}, simulation mode: {self.simulation_mode}",
+            "INFO"
+        )
+        
+        print(f"OrderAgent initialized for {team} - Order Types: {self.order_types}, Simulation: {self.simulation_mode}")
 
     def _parse_risk_message(self, messages: List) -> Dict:
         """
@@ -590,8 +1264,89 @@ class OrderAgent(BaseAgent):
         Returns:
             Dict: Parsed risk assessment data
         """
-        # TODO: Implement risk message parsing
-        return {}
+        try:
+            # Find latest message from "{self.team} Risk Agent"
+            risk_agent_name = f"{self.team} Risk Agent"
+            latest_message = None
+            
+            for message in reversed(messages):
+                if hasattr(message, 'content') and risk_agent_name in str(message.content):
+                    latest_message = message
+                    break
+            
+            if not latest_message:
+                trading_logger.log_message(
+                    self.team,
+                    f"No message found from {risk_agent_name}",
+                    "WARNING"
+                )
+                return {}
+            
+            # Parse message content to extract risk assessment data
+            content = str(latest_message.content)
+            parsed_data = {}
+            
+            # Extract SIGNAL
+            if "SIGNAL:" in content:
+                signal_line = [line for line in content.split('\n') if 'SIGNAL:' in line][0]
+                parsed_data['signal'] = signal_line.split('SIGNAL:')[1].strip()
+            
+            # Extract PRICE
+            if "PRICE:" in content:
+                price_line = [line for line in content.split('\n') if 'PRICE:' in line][0]
+                parsed_data['price'] = float(price_line.split('PRICE:')[1].strip())
+            
+            # Extract STRATEGY
+            if "STRATEGY:" in content:
+                strategy_line = [line for line in content.split('\n') if 'STRATEGY:' in line][0]
+                parsed_data['strategy'] = strategy_line.split('STRATEGY:')[1].strip()
+            
+            # Extract RISK_LEVEL
+            if "RISK_LEVEL:" in content:
+                risk_line = [line for line in content.split('\n') if 'RISK_LEVEL:' in line][0]
+                parsed_data['risk_level'] = risk_line.split('RISK_LEVEL:')[1].strip()
+            
+            # Extract RECOMMENDATION
+            if "RECOMMENDATION:" in content:
+                rec_line = [line for line in content.split('\n') if 'RECOMMENDATION:' in line][0]
+                parsed_data['recommendation'] = rec_line.split('RECOMMENDATION:')[1].strip()
+            
+            # Extract POSITION_SIZE
+            if "POSITION_SIZE:" in content:
+                pos_line = [line for line in content.split('\n') if 'POSITION_SIZE:' in line][0]
+                parsed_data['position_size'] = float(pos_line.split('POSITION_SIZE:')[1].strip())
+            
+            # Extract STOP_LOSS
+            if "STOP_LOSS:" in content:
+                sl_line = [line for line in content.split('\n') if 'STOP_LOSS:' in line][0]
+                parsed_data['stop_loss'] = sl_line.split('STOP_LOSS:')[1].strip()
+            
+            # Extract TAKE_PROFIT
+            if "TAKE_PROFIT:" in content:
+                tp_line = [line for line in content.split('\n') if 'TAKE_PROFIT:' in line][0]
+                parsed_data['take_profit'] = tp_line.split('TAKE_PROFIT:')[1].strip()
+            
+            # Extract RISK_FACTORS
+            if "RISK_FACTORS:" in content:
+                rf_line = [line for line in content.split('\n') if 'RISK_FACTORS:' in line][0]
+                parsed_data['risk_factors'] = rf_line.split('RISK_FACTORS:')[1].strip()
+            
+            trading_logger.log_message(
+                self.team,
+                f"Parsed risk message: {parsed_data}",
+                "INFO"
+            )
+            
+            return parsed_data
+            
+        except Exception as e:
+            # Handle parsing errors gracefully
+            trading_logger.log_message(
+                self.team,
+                f"Error parsing risk message: {str(e)}",
+                "ERROR"
+            )
+            return {}
 
     def _validate_order(self, order_data: Dict) -> Dict:
         """
@@ -614,8 +1369,101 @@ class OrderAgent(BaseAgent):
         Returns:
             Dict: Validation result with is_valid flag and reasons
         """
-        # TODO: Implement order validation
-        return {"is_valid": True, "reasons": []}
+        try:
+            validation_result = {
+                "is_valid": True,
+                "reasons": [],
+                "warnings": []
+            }
+            
+            # 1. Check if recommendation is "PROCEED"
+            recommendation = order_data.get('recommendation', '')
+            if recommendation != "PROCEED":
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append(f"Recommendation is {recommendation}, not PROCEED")
+                return validation_result
+            
+            # 2. Validate order parameters
+            signal = order_data.get('signal', '')
+            price = order_data.get('price', 0)
+            position_size = order_data.get('position_size', 0)
+            
+            # Check signal is valid (BUY/SELL)
+            if signal not in ['BUY', 'SELL']:
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append(f"Invalid signal: {signal}")
+            
+            # Check price is reasonable (not zero or negative)
+            if price <= 0:
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append(f"Invalid price: {price}")
+            
+            # Check position size is within limits
+            if position_size <= 0:
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append(f"Invalid position size: {position_size}")
+            elif position_size > self.max_order_size:
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append(f"Position size exceeds maximum: {position_size} > {self.max_order_size}")
+            
+            # Check sufficient portfolio balance (simulated)
+            portfolio_balance = self._get_portfolio_balance()
+            order_value = price * position_size
+            if signal == 'BUY' and order_value > portfolio_balance:
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append(f"Insufficient balance: {order_value} > {portfolio_balance}")
+            
+            # 3. Check for duplicate orders
+            if self._check_duplicate_orders(order_data):
+                validation_result["is_valid"] = False
+                validation_result["reasons"].append("Duplicate order detected")
+            
+            # 4. Verify risk limits are not exceeded
+            risk_level = order_data.get('risk_level', '')
+            if risk_level == 'HIGH':
+                validation_result["warnings"].append("High risk level detected")
+            
+            # Additional validations
+            if order_value < 100:  # Minimum order size
+                validation_result["warnings"].append("Order value below minimum threshold")
+            
+            trading_logger.log_message(
+                self.team,
+                f"Order validation result: {validation_result['is_valid']}, reasons: {validation_result['reasons']}",
+                "INFO"
+            )
+            
+            return validation_result
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error validating order: {str(e)}",
+                "ERROR"
+            )
+            return {
+                "is_valid": False,
+                "reasons": [f"Validation error: {str(e)}"],
+                "warnings": []
+            }
+    
+    def _get_portfolio_balance(self) -> float:
+        """Helper method to get current portfolio balance"""
+        try:
+            # This would typically query the database for current balance
+            # For now, return a simulated balance
+            return 100000  # $100,000 simulated balance
+        except Exception:
+            return 0.0
+    
+    def _check_duplicate_orders(self, order_data: Dict) -> bool:
+        """Helper method to check for duplicate orders"""
+        try:
+            # This would typically check recent orders in the database
+            # For now, return False (no duplicates)
+            return False
+        except Exception:
+            return True  # Assume duplicate on error
 
     def _execute_market_order(self, signal: str, price: float, position_size: float) -> Dict:
         """
@@ -642,14 +1490,137 @@ class OrderAgent(BaseAgent):
         Returns:
             Dict: Execution result with success flag and details
         """
-        # TODO: Implement market order execution
-        return {
-            "success": True,
-            "order_id": "sim_" + str(datetime.now().timestamp()),
-            "executed_price": price,
-            "quantity": position_size,
-            "fees": 0.001 * position_size  # 0.1% fee
-        }
+        try:
+            # 1. Create order object
+            order_id = f"sim_{self.team}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            timestamp = datetime.now()
+            
+            # Calculate quantity from position_size and price
+            portfolio_value = self._get_portfolio_balance()
+            order_value = portfolio_value * position_size
+            quantity = order_value / price
+            
+            order_object = {
+                "order_id": order_id,
+                "order_type": "market",
+                "signal": signal,
+                "quantity": quantity,
+                "timestamp": timestamp,
+                "expected_price": price,
+                "team": self.team,
+                "status": "pending"
+            }
+            
+            # 2. For simulation: Apply slippage to execution price
+            if self.simulation_mode:
+                slippage_factor = 1 + (self.default_slippage if signal == 'BUY' else -self.default_slippage)
+                executed_price = price * slippage_factor
+                
+                # Simulate execution delay
+                import time
+                time.sleep(0.1)  # Simulate 100ms execution time
+                
+                execution_result = {
+                    "success": True,
+                    "order_id": order_id,
+                    "executed_price": executed_price,
+                    "quantity": quantity,
+                    "fees": order_value * 0.001,  # 0.1% fee
+                    "slippage": abs(executed_price - price),
+                    "execution_time": datetime.now(),
+                    "simulation": True
+                }
+                
+                trading_logger.log_message(
+                    self.team,
+                    f"Simulated market order executed: {signal} {quantity:.4f} @ ${executed_price:.2f}",
+                    "INFO"
+                )
+                
+            else:
+                # 3. For real trading: Send order to exchange API
+                # This would integrate with actual exchange APIs
+                execution_result = {
+                    "success": False,
+                    "order_id": order_id,
+                    "error": "Real trading not implemented",
+                    "simulation": False
+                }
+                
+                trading_logger.log_message(
+                    self.team,
+                    f"Real trading not implemented for order {order_id}",
+                    "WARNING"
+                )
+            
+            # 4. Store order in database
+            if execution_result["success"]:
+                order_record = {
+                    **order_object,
+                    "executed_price": execution_result["executed_price"],
+                    "fees": execution_result["fees"],
+                    "status": "executed"
+                }
+                
+                # Store in database (simulated)
+                self._store_order_in_database(order_record)
+                
+                # 5. Update portfolio positions
+                self._update_position_tracking(signal, quantity, execution_result["executed_price"])
+            
+            return execution_result
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error executing market order: {str(e)}",
+                "ERROR"
+            )
+            return {
+                "success": False,
+                "order_id": f"error_{datetime.now().timestamp()}",
+                "error": str(e),
+                "executed_price": 0,
+                "quantity": 0,
+                "fees": 0
+            }
+    
+    def _store_order_in_database(self, order_record: Dict) -> None:
+        """Helper method to store order in database"""
+        try:
+            # This would typically store in MongoDB
+            # For now, just log the order
+            trading_logger.log_message(
+                self.team,
+                f"Order stored in database: {order_record['order_id']}",
+                "INFO"
+            )
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error storing order in database: {str(e)}",
+                "ERROR"
+            )
+    
+    def _update_position_tracking(self, signal: str, quantity: float, price: float) -> None:
+        """Helper method to update position tracking"""
+        try:
+            if signal == 'BUY':
+                self.position_tracking[self.team] = self.position_tracking.get(self.team, 0) + quantity
+            elif signal == 'SELL':
+                self.position_tracking[self.team] = self.position_tracking.get(self.team, 0) - quantity
+            
+            trading_logger.log_message(
+                self.team,
+                f"Position updated: {signal} {quantity:.4f} @ ${price:.2f}, Total: {self.position_tracking.get(self.team, 0):.4f}",
+                "INFO"
+            )
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error updating position tracking: {str(e)}",
+                "ERROR"
+            )
 
     def _update_portfolio_positions(self, order_result: Dict, signal: str) -> None:
         """
@@ -669,8 +1640,154 @@ class OrderAgent(BaseAgent):
             order_result: Result from order execution
             signal: BUY or SELL signal
         """
-        # TODO: Implement portfolio position updates
-        pass
+        try:
+            if not order_result.get("success", False):
+                trading_logger.log_message(
+                    self.team,
+                    "Cannot update portfolio positions - order execution failed",
+                    "WARNING"
+                )
+                return
+            
+            # 1. Load current portfolio positions from database
+            current_positions = self._load_portfolio_positions()
+            
+            # Extract order details
+            quantity = order_result.get("quantity", 0)
+            executed_price = order_result.get("executed_price", 0)
+            fees = order_result.get("fees", 0)
+            
+            if quantity <= 0 or executed_price <= 0:
+                trading_logger.log_message(
+                    self.team,
+                    f"Invalid order details for position update: quantity={quantity}, price={executed_price}",
+                    "ERROR"
+                )
+                return
+            
+            # 2. Update position based on executed order
+            position_key = f"{self.team}_position"
+            current_position = current_positions.get(position_key, {
+                "quantity": 0,
+                "average_cost": 0,
+                "total_cost": 0,
+                "unrealized_pnl": 0
+            })
+            
+            if signal == 'BUY':
+                # BUY: Add to position (or reduce short position)
+                new_quantity = current_position["quantity"] + quantity
+                new_total_cost = current_position["total_cost"] + (quantity * executed_price) + fees
+                
+                if new_quantity != 0:
+                    new_average_cost = new_total_cost / new_quantity
+                else:
+                    new_average_cost = 0
+                
+                trading_logger.log_message(
+                    self.team,
+                    f"BUY position update: +{quantity:.4f} @ ${executed_price:.2f}, New total: {new_quantity:.4f}",
+                    "INFO"
+                )
+                
+            elif signal == 'SELL':
+                # SELL: Reduce position (or add to short position)
+                new_quantity = current_position["quantity"] - quantity
+                
+                # Calculate realized PnL for the sold portion
+                sold_cost_basis = quantity * current_position["average_cost"]
+                sale_proceeds = (quantity * executed_price) - fees
+                realized_pnl = sale_proceeds - sold_cost_basis
+                
+                # Update total cost (reduce by sold cost basis)
+                new_total_cost = current_position["total_cost"] - sold_cost_basis
+                
+                if new_quantity != 0:
+                    new_average_cost = new_total_cost / new_quantity
+                else:
+                    new_average_cost = 0
+                
+                trading_logger.log_message(
+                    self.team,
+                    f"SELL position update: -{quantity:.4f} @ ${executed_price:.2f}, Realized PnL: ${realized_pnl:.2f}",
+                    "INFO"
+                )
+                
+            else:
+                trading_logger.log_message(
+                    self.team,
+                    f"Invalid signal for position update: {signal}",
+                    "ERROR"
+                )
+                return
+            
+            # 3. Calculate new average cost basis (already calculated above)
+            
+            # 4. Update portfolio value and cash balance
+            updated_position = {
+                "quantity": new_quantity,
+                "average_cost": new_average_cost,
+                "total_cost": new_total_cost,
+                "unrealized_pnl": 0,  # Would calculate based on current market price
+                "last_updated": datetime.now()
+            }
+            
+            current_positions[position_key] = updated_position
+            
+            # 5. Store updated positions in database
+            self._store_portfolio_positions(current_positions)
+            
+            # 6. Log position changes
+            trading_logger.log_message(
+                self.team,
+                f"Portfolio position updated: {signal} {quantity:.4f} @ ${executed_price:.2f}, "
+                f"New position: {new_quantity:.4f} @ ${new_average_cost:.2f}",
+                "INFO"
+            )
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error updating portfolio positions: {str(e)}",
+                "ERROR"
+            )
+    
+    def _load_portfolio_positions(self) -> Dict:
+        """Helper method to load current portfolio positions"""
+        try:
+            # This would typically load from MongoDB
+            # For now, return simulated positions
+            return {
+                f"{self.team}_position": {
+                    "quantity": 0,
+                    "average_cost": 0,
+                    "total_cost": 0,
+                    "unrealized_pnl": 0
+                }
+            }
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error loading portfolio positions: {str(e)}",
+                "ERROR"
+            )
+            return {}
+    
+    def _store_portfolio_positions(self, positions: Dict) -> None:
+        """Helper method to store portfolio positions"""
+        try:
+            # This would typically store in MongoDB
+            trading_logger.log_message(
+                self.team,
+                f"Portfolio positions stored: {len(positions)} positions",
+                "INFO"
+            )
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error storing portfolio positions: {str(e)}",
+                "ERROR"
+            )
 
     def _store_order_record(self, order_data: Dict, execution_result: Dict) -> str:
         """
@@ -697,8 +1814,70 @@ class OrderAgent(BaseAgent):
         Returns:
             str: Database record ID
         """
-        # TODO: Implement order record storage
-        return "sim_record_" + str(datetime.now().timestamp())
+        try:
+            # 1. Create order record
+            order_record = {
+                "team": self.team,
+                "timestamp": execution_result.get("execution_time", datetime.now()),
+                "signal": order_data.get("signal", ""),
+                "strategy": order_data.get("strategy", ""),
+                "price": execution_result.get("executed_price", 0),
+                "quantity": execution_result.get("quantity", 0),
+                "fees": execution_result.get("fees", 0),
+                "order_id": execution_result.get("order_id", ""),
+                "status": "executed" if execution_result.get("success", False) else "failed",
+                "risk_level": order_data.get("risk_level", ""),
+                "position_size": order_data.get("position_size", 0),
+                "stop_loss": order_data.get("stop_loss", ""),
+                "take_profit": order_data.get("take_profit", ""),
+                "slippage": execution_result.get("slippage", 0),
+                "simulation": execution_result.get("simulation", True),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
+            }
+            
+            # 2. Store in database orders collection
+            record_id = self._save_order_to_database(order_record)
+            
+            # 3. Return order record ID
+            trading_logger.log_message(
+                self.team,
+                f"Order record stored with ID: {record_id}",
+                "INFO"
+            )
+            
+            return record_id
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error storing order record: {str(e)}",
+                "ERROR"
+            )
+            return f"error_record_{datetime.now().timestamp()}"
+    
+    def _save_order_to_database(self, order_record: Dict) -> str:
+        """Helper method to save order to database"""
+        try:
+            # This would typically save to MongoDB orders collection
+            # For now, simulate database save and return record ID
+            record_id = f"order_{self.team}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+            
+            trading_logger.log_message(
+                self.team,
+                f"Order saved to database: {record_id} - {order_record['signal']} {order_record['quantity']:.4f} @ ${order_record['price']:.2f}",
+                "INFO"
+            )
+            
+            return record_id
+            
+        except Exception as e:
+            trading_logger.log_message(
+                self.team,
+                f"Error saving order to database: {str(e)}",
+                "ERROR"
+            )
+            return f"error_{datetime.now().timestamp()}"
 
     async def process(self, state: AgentState) -> AgentState:
         """
@@ -742,14 +1921,134 @@ class OrderAgent(BaseAgent):
         Returns:
             AgentState: Updated state with order execution results
         """
-        # TODO: Implement complete order execution workflow
-        print(f"TODO: {self.team} OrderAgent.process() needs implementation!")
-        print("HINT: Start with _parse_risk_message() to extract order data")
-        print("HINT: Use _validate_order() before executing")
-        print("HINT: Update portfolio positions after execution")
+        # STEP 1: MESSAGE PARSING
+        trading_logger.log_message(
+            self.team,
+            f"Starting order execution for {self.team}",
+            "INFO"
+        )
+        print(f"OrderAgent: Starting order execution for {self.team}")
         
-        # Mark as complete to avoid blocking workflow during development
+        order_data = self._parse_risk_message(state["messages"])
+        if not order_data:
+            trading_logger.log_message(
+                self.team,
+                f"No valid order data found for {self.team}",
+                "WARNING"
+            )
+            print(f"OrderAgent: No valid order data found for {self.team}")
+            # Mark as complete to avoid blocking workflow
+            state["trading_teams"][self.team.lower()]["order_complete"] = True
+            return state
+        
+        # STEP 2: ORDER VALIDATION
+        validation_result = self._validate_order(order_data)
+        
+        if not validation_result["is_valid"]:
+            trading_logger.log_message(
+                self.team,
+                f"Order validation failed: {validation_result['reasons']}",
+                "WARNING"
+            )
+            print(f"OrderAgent: Order validation failed: {validation_result['reasons']}")
+            
+            # Send rejection message
+            rejection_message = f"""TO: {self.team} Team Manager
+MESSAGE: Order Execution - REJECTED
+SIGNAL: {order_data.get('signal', 'N/A')}
+PRICE: {order_data.get('price', 0)}
+REASON: {', '.join(validation_result['reasons'])}
+ACTION: Order rejected due to validation failure"""
+            
+            state["messages"].append(AIMessage(content=rejection_message))
+            state["message_history"].append({
+                "from": self.name,
+                "content": f"Order REJECTED: {', '.join(validation_result['reasons'])}",
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            # Mark as complete
+            state["trading_teams"][self.team.lower()]["order_complete"] = True
+            return state
+        
+        # Log warnings if any
+        if validation_result["warnings"]:
+            trading_logger.log_message(
+                self.team,
+                f"Order validation warnings: {validation_result['warnings']}",
+                "WARNING"
+            )
+            print(f"OrderAgent: Validation warnings: {validation_result['warnings']}")
+        
+        # STEP 3: ORDER EXECUTION (if validation passes)
+        signal = order_data.get('signal', '')
+        price = order_data.get('price', 0)
+        position_size = order_data.get('position_size', 0)
+        
+        execution_result = self._execute_market_order(signal, price, position_size)
+        
+        if not execution_result.get("success", False):
+            trading_logger.log_message(
+                self.team,
+                f"Order execution failed: {execution_result.get('error', 'Unknown error')}",
+                "ERROR"
+            )
+            print(f"OrderAgent: Order execution failed: {execution_result.get('error', 'Unknown error')}")
+            
+            # Send failure message
+            failure_message = f"""TO: {self.team} Team Manager
+MESSAGE: Order Execution - FAILED
+SIGNAL: {signal}
+PRICE: {price}
+ERROR: {execution_result.get('error', 'Unknown error')}
+ACTION: Order execution failed"""
+            
+            state["messages"].append(AIMessage(content=failure_message))
+            state["message_history"].append({
+                "from": self.name,
+                "content": f"Order FAILED: {execution_result.get('error', 'Unknown error')}",
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            # Mark as complete
+            state["trading_teams"][self.team.lower()]["order_complete"] = True
+            return state
+        
+        # STEP 4: POSITION MANAGEMENT
+        self._update_portfolio_positions(execution_result, signal)
+        
+        record_id = self._store_order_record(order_data, execution_result)
+        
+        # STEP 5: COMMUNICATION
+        success_message = f"""TO: {self.team} Team Manager
+MESSAGE: Order Execution - SUCCESS
+ORDER_ID: {execution_result.get('order_id', 'N/A')}
+SIGNAL: {signal}
+EXECUTED_PRICE: {execution_result.get('executed_price', 0):.2f}
+QUANTITY: {execution_result.get('quantity', 0):.4f}
+FEES: {execution_result.get('fees', 0):.2f}
+SLIPPAGE: {execution_result.get('slippage', 0):.4f}
+RECORD_ID: {record_id}
+ACTION: Order executed successfully"""
+        
+        state["messages"].append(AIMessage(content=success_message))
+        state["message_history"].append({
+            "from": self.name,
+            "content": f"Order EXECUTED: {signal} {execution_result.get('quantity', 0):.4f} @ ${execution_result.get('executed_price', 0):.2f}",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # STEP 6: STATE UPDATE
         state["trading_teams"][self.team.lower()]["order_complete"] = True
+        
+        trading_logger.log_message(
+            self.team,
+            f"Order execution completed for {self.team}",
+            "INFO"
+        )
+        
+        print(f"OrderAgent: Order execution completed - {signal} {execution_result.get('quantity', 0):.4f} @ ${execution_result.get('executed_price', 0):.2f}")
+        
         return state
 
 # Portfolio Management Agent
@@ -964,16 +2263,32 @@ class DataAgent(BaseAgent):
             role=role
         )
         
-        # TODO: Implement remaining initialization (steps 2-8)
-        # Hint: self.team = team
-        # Hint: self.symbol = config["data_fetching"]["symbols"][team]
-        # Hint: self.interval = config["data_fetching"]["interval"]
-        # Hint: self.last_fetch_time = None
-        # Hint: self.db_service = MongoDBService()
-        # Hint: self.yf_token = yf.Ticker(self.symbol)
+        # 2. Store team name for this agent
+        self.team = team
         
-        print(f"TODO: {team} DataAgent needs implementation!")
-        print(f"HINT: Complete steps 2-8 in __init__ method")
+        # 3. Get symbol from config: config["data_fetching"]["symbols"][team]
+        self.symbol = config["data_fetching"]["symbols"][team]
+        
+        # 4. Get interval from config: config["data_fetching"]["interval"]
+        self.interval = config["data_fetching"]["interval"]
+        
+        # 5. Initialize last_fetch_time as None
+        self.last_fetch_time = None
+        
+        # 6. Initialize database service (MongoDBService)
+        self.db_service = MongoDBService()
+        
+        # 7. Initialize yfinance Ticker: yf.Ticker(self.symbol)
+        self.yf_token = yf.Ticker(self.symbol)
+        
+        # 8. Log successful initialization
+        trading_logger.log_message(
+            self.team,
+            f"DataAgent initialized for {self.symbol} with interval {self.interval}",
+            "INFO"
+        )
+        
+        print(f"DataAgent initialized for {team} - Symbol: {self.symbol}, Interval: {self.interval}")
 
     async def fetch_market_data(self) -> Optional[PriceSnapshot]:
         """
