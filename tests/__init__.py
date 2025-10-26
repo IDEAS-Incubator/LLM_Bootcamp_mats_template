@@ -1,0 +1,1 @@
+# Tests package for Multi-Agent Crypto Trading System 
